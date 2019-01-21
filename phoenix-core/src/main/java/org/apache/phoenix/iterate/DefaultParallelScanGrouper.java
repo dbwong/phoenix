@@ -20,15 +20,13 @@ package org.apache.phoenix.iterate;
 import java.sql.SQLException;
 import java.util.List;
 
-import com.google.common.base.Preconditions;
 import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.phoenix.compile.QueryPlan;
-import org.apache.phoenix.compile.StatementContext;
+import org.apache.phoenix.query.ConnectionQueryServices;
 import org.apache.phoenix.schema.PTable;
 import org.apache.phoenix.schema.PTable.IndexType;
 import org.apache.phoenix.schema.SaltingUtil;
-import org.apache.phoenix.schema.TableRef;
 import org.apache.phoenix.util.ScanUtil;
 
 /**
@@ -68,7 +66,7 @@ public class DefaultParallelScanGrouper implements ParallelScanGrouper {
   }
 
   @Override
-  public List<HRegionLocation> getRegionBoundaries(StatementContext context, byte[] tableName) throws SQLException{
-    return context.getConnection().getQueryServices().getAllTableRegions(tableName);
+  public List<HRegionLocation> getRegionBoundaries(ConnectionQueryServices connectionQueryServices, byte[] tableName) throws SQLException{
+    return connectionQueryServices.getAllTableRegions(tableName);
   }
 }

@@ -19,11 +19,10 @@ package org.apache.phoenix.iterate;
 
 import java.sql.SQLException;
 import java.util.List;
-
+import org.apache.phoenix.query.ConnectionQueryServices;
 import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.phoenix.compile.QueryPlan;
-import org.apache.phoenix.compile.StatementContext;
 
 /**
  * Interface for a parallel scan grouper
@@ -41,6 +40,6 @@ public interface ParallelScanGrouper {
 	 */
 	boolean shouldStartNewScan(QueryPlan plan, List<Scan> scans, byte[] startKey, boolean crossedRegionBoundary);
 
-	List<HRegionLocation> getRegionBoundaries(StatementContext context, byte[] tableName) throws SQLException;
+	List<HRegionLocation> getRegionBoundaries(ConnectionQueryServices connectionQueryServices, byte[] tableName) throws SQLException;
 
 }
