@@ -35,8 +35,8 @@ import org.apache.hadoop.hbase.protobuf.generated.SnapshotProtos;
 import org.apache.hadoop.hbase.snapshot.SnapshotDescriptionUtils;
 import org.apache.hadoop.hbase.snapshot.SnapshotManifest;
 import org.apache.phoenix.compile.QueryPlan;
-import org.apache.phoenix.compile.StatementContext;
 import org.apache.phoenix.mapreduce.util.PhoenixConfigurationUtil;
+import org.apache.phoenix.query.ConnectionQueryServices;
 
 /**
  * Scan grouper that creates a scan group if a plan is row key ordered or if a
@@ -59,9 +59,10 @@ public class MapReduceParallelScanGrouper implements ParallelScanGrouper {
 	}
 
 	@Override
-	public List<HRegionLocation> getRegionBoundaries(StatementContext context, byte[] tableName) throws SQLException {
+	public List<HRegionLocation> getRegionBoundaries(
+			ConnectionQueryServices connectionQueryServices, byte[] tableName) throws SQLException {
 		String snapshotName;
-		Configuration conf = context.getConnection().getQueryServices().getConfiguration();
+		Configuration conf = connectionQueryServices.getConfiguration();
 		if((snapshotName = getSnapshotName(conf)) != null) {
 			try {
 				Path rootDir = new Path(conf.get(HConstants.HBASE_DIR));
@@ -76,7 +77,7 @@ public class MapReduceParallelScanGrouper implements ParallelScanGrouper {
 			}
 		}
 		else {
-			return context.getConnection().getQueryServices().getAllTableRegions(tableName);
+			return connectionQueryServices.getAllTableRegions(tableName);
 		}
 	}
 

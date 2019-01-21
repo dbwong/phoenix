@@ -1787,7 +1787,11 @@ public abstract class BaseTest {
     protected static void splitRegion(TableName fullTableName, byte[] splitPoint) throws SQLException, IOException, InterruptedException {
          HBaseAdmin admin =
                 driver.getConnectionQueryServices(getUrl(), TestUtil.TEST_PROPERTIES).getAdmin();
-        admin.split(fullTableName, splitPoint);
+        try {
+            admin.split(fullTableName, splitPoint);
+        } catch ( Exception e) {
+            System.out.println(e);
+        }
         // make sure the split finishes (there's no synchronous splitting before HBase 2.x)
         admin.disableTable(fullTableName);
         admin.enableTable(fullTableName);
