@@ -1,11 +1,11 @@
 package org.apache.phoenix.iterate;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Optional;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.phoenix.query.KeyRange;
 import org.apache.phoenix.schema.stats.GuidePostsInfo;
-import org.apache.phoenix.util.ByteUtil;
 import org.apache.phoenix.util.Closeables;
 import org.apache.phoenix.util.PrefixByteCodec;
 import org.apache.phoenix.util.PrefixByteDecoder;
@@ -18,7 +18,6 @@ import java.io.DataInputStream;
 import java.io.EOFException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * Note: There are several performance improvements from a memory usage view possible
@@ -75,9 +74,14 @@ public class GuidePostPhoenixClientStatistics implements PhoenixClientStatistics
 
                     // Continue walking guideposts until we get past the currentKey
                     // note that even if this is greater than endKey this should still contain relevant values
-                    if (!foundFirstGuidePost &&  (keyRange.lowerUnbound()  || startKey.compareTo(currentGuidePost) >= 0)) {
+                    if (!foundFirstGuidePost &&  (keyRange.lowerUnbound()  || startKey.compareTo(currentGuidePost) <= 0)) {
                         foundFirstGuidePost = true;
                     }
+
+                    //update the time estimates since for example querying a range we dont' have guideposts for should reflect the stats of that time
+                    long estimatedTimestamp = gps.getGuidePostTimestamps()[readGuidePosts - 1];
+                    minTimestamp = Math.min(minTimestamp, estimatedTimestamp);
+                    maxTimestamp = Math.max(maxTimestamp, estimatedTimestamp);
 
                     if (foundFirstGuidePost) {
                         long estimatedRows = gps.getRowCounts()[readGuidePosts - 1];
@@ -85,10 +89,6 @@ public class GuidePostPhoenixClientStatistics implements PhoenixClientStatistics
 
                         long estimatedSize = gps.getByteCounts()[readGuidePosts - 1];
                         sizeBytes += estimatedSize;
-
-                        long estimatedTimestamp = gps.getGuidePostTimestamps()[readGuidePosts - 1];
-                        minTimestamp = Math.min(minTimestamp, estimatedTimestamp);
-                        maxTimestamp = Math.max(maxTimestamp, estimatedTimestamp);
 
                         byte[] binEndKey = currentGuidePost.copyBytes();
 
@@ -108,7 +108,7 @@ public class GuidePostPhoenixClientStatistics implements PhoenixClientStatistics
                     }
 
                     //Believe it has to be strictly greater as you could have 2 guide posts (or more)
-                    if (stopKey.getLength() > 0 && stopKey.compareTo(currentGuidePost) > 0) {
+                    if (stopKey.getLength() > 0 && stopKey.compareTo(currentGuidePost) < 0) {
                         break;
                     }
                 }
@@ -138,27 +138,5 @@ public class GuidePostPhoenixClientStatistics implements PhoenixClientStatistics
                         bins);
 
         return summary;
-    }
-
-    @VisibleForTesting
-    KeyRange buildKeyRangeForStatisticsBin(KeyRange inputKeyRange, Optional<KeyRange> lastKeyRange, byte[] binEndKey){
-
-
-        //Inherit the first start key from the inputKeyRange
-        byte[] startKey = lastKeyRange.orElse(inputKeyRange).getLowerRange();
-        boolean startInclusive = lastKeyRange.isPresent() ? false : inputKeyRange.isLowerInclusive();
-
-        byte[] endKey = binEndKey;
-        boolean endInclusive = true;
-
-        //Handle the input key end cutoff, binEndKeys are allways Inclusive
-        if(Bytes.compareTo(binEndKey,inputKeyRange.getUpperRange()) >= 0 ){
-            endKey = inputKeyRange.getUpperRange();
-            endInclusive = inputKeyRange.isUpperInclusive();
-        }
-
-        return KeyRange.getKeyRange(startKey,startInclusive,endKey,endInclusive);
-
-
     }
 }
