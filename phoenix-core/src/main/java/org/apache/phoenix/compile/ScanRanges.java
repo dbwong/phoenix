@@ -687,11 +687,4 @@ public class ScanRanges {
         return rowTimestampRange;
     }
 
-    /**
-     * return: A sorted by rowkey list of non-intersecting RangeKeys
-     */
-    public List<KeyRange> getRowKeyBasedKeyRanges(){
-        return new ArrayList<>();
-    }
-
 }
