@@ -200,10 +200,10 @@ public class MutableIndexIT extends ParallelStatsDisabledIT {
             assertEquals(5L, rs.getLong(3));
             assertFalse(rs.next());
             if(localIndex) {
-                query = "SELECT b.* from " + fullTableName + " where int_col1 = 4";
+                query = "SELECT b.* from " + fullTableName + " where int_col1 = 4 AND char_col1 = 'chara'";
                 rs = conn.createStatement().executeQuery("EXPLAIN " + query);
-                assertEquals("CLIENT PARALLEL 1-WAY RANGE SCAN OVER " + fullTableName +" [1]\n" +
-                        "    SERVER FILTER BY TO_INTEGER(\"INT_COL1\") = 4\nCLIENT MERGE SORT", QueryUtil.getExplainPlan(rs));
+                assertEquals("CLIENT PARALLEL 1-WAY RANGE SCAN OVER " + fullTableName +" [1,'chara',4]\n" +
+                        "CLIENT MERGE SORT", QueryUtil.getExplainPlan(rs));
                 rs = conn.createStatement().executeQuery(query);
                 assertTrue(rs.next());
                 assertEquals("varchar_b", rs.getString(1));

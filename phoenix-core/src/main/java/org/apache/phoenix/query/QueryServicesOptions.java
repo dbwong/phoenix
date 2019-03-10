@@ -85,6 +85,7 @@ import static org.apache.phoenix.query.QueryServices.SPOOL_THRESHOLD_BYTES_ATTRI
 import static org.apache.phoenix.query.QueryServices.STATS_COLLECTION_ENABLED;
 import static org.apache.phoenix.query.QueryServices.STATS_GUIDEPOST_WIDTH_BYTES_ATTRIB;
 import static org.apache.phoenix.query.QueryServices.STATS_UPDATE_FREQ_MS_ATTRIB;
+import static org.apache.phoenix.query.QueryServices.STATS_CACHE_THREAD_POOL_SIZE;
 import static org.apache.phoenix.query.QueryServices.STATS_USE_CURRENT_TIME_ATTRIB;
 import static org.apache.phoenix.query.QueryServices.THREAD_POOL_SIZE_ATTRIB;
 import static org.apache.phoenix.query.QueryServices.THREAD_TIMEOUT_MS_ATTRIB;
@@ -246,6 +247,7 @@ public class QueryServicesOptions {
     public static final long DEFAULT_STATS_MAX_CACHE_SIZE = 256 * 1024 * 1024;
     // Allow stats collection to be initiated by client multiple times immediately
     public static final int DEFAULT_MIN_STATS_UPDATE_FREQ_MS = 0;
+    public static final int DEFAULT_STATS_CACHE_THREAD_POOL_SIZE = 4;
 
     public static final boolean DEFAULT_USE_REVERSE_SCAN = true;
 
@@ -347,6 +349,8 @@ public class QueryServicesOptions {
 
     public static final boolean DEFAULT_ALLOW_SPLITTABLE_SYSTEM_CATALOG_ROLLBACK = false;
 
+    public static final boolean DEFAULT_PROPERTY_POLICY_PROVIDER_ENABLED = true;
+
     @SuppressWarnings("serial")
     public static final Set<String> DEFAULT_QUERY_SERVER_SKIP_WORDS = new HashSet<String>() {
       {
@@ -365,9 +369,11 @@ public class QueryServicesOptions {
     public static final boolean DEFAULT_ENABLE_SERVER_UPSERT_SELECT = false;
 
     // By default generally allow server trigger mutations
-    public static final boolean DEFAULT_ENABLE_SERVER_SIDE_MUTATIONS = true;
+    public static final boolean DEFAULT_ENABLE_SERVER_SIDE_DELETE_MUTATIONS = true;
+    public static final boolean DEFAULT_ENABLE_SERVER_SIDE_UPSERT_MUTATIONS = true;
 
     public static final boolean DEFAULT_COST_BASED_OPTIMIZER_ENABLED = false;
+    public static final boolean DEFAULT_WILDCARD_QUERY_DYNAMIC_COLS_ATTRIB = false;
     public static final String DEFAULT_LOGGING_LEVEL = LogLevel.OFF.name();
     public static final String DEFAULT_LOG_SAMPLE_RATE = "1.0";
     public static final int DEFAULT_LOG_SALT_BUCKETS = 32;
@@ -411,6 +417,7 @@ public class QueryServicesOptions {
             .setIfUnset(DATE_FORMAT_TIMEZONE_ATTRIB, DEFAULT_DATE_FORMAT_TIMEZONE)
             .setIfUnset(STATS_UPDATE_FREQ_MS_ATTRIB, DEFAULT_STATS_UPDATE_FREQ_MS)
             .setIfUnset(MIN_STATS_UPDATE_FREQ_MS_ATTRIB, DEFAULT_MIN_STATS_UPDATE_FREQ_MS)
+            .setIfUnset(STATS_CACHE_THREAD_POOL_SIZE, DEFAULT_STATS_CACHE_THREAD_POOL_SIZE)
             .setIfUnset(CALL_QUEUE_ROUND_ROBIN_ATTRIB, DEFAULT_CALL_QUEUE_ROUND_ROBIN)
             .setIfUnset(MAX_MUTATION_SIZE_ATTRIB, DEFAULT_MAX_MUTATION_SIZE)
             .setIfUnset(ROW_KEY_ORDER_SALTED_TABLE_ATTRIB, DEFAULT_FORCE_ROW_KEY_ORDER)
@@ -726,6 +733,10 @@ public class QueryServicesOptions {
 
     public QueryServicesOptions setMinStatsUpdateFrequencyMs(int frequencyMs) {
         return set(MIN_STATS_UPDATE_FREQ_MS_ATTRIB, frequencyMs);
+    }
+
+    public QueryServicesOptions setStatsCacheThreadPoolSize(int threadPoolSize) {
+        return set(STATS_CACHE_THREAD_POOL_SIZE, threadPoolSize);
     }
 
     public QueryServicesOptions setSequenceSaltBuckets(int saltBuckets) {

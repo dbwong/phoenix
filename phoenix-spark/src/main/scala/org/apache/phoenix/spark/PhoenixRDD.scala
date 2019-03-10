@@ -21,6 +21,7 @@ import org.apache.hadoop.io.NullWritable
 import org.apache.phoenix.jdbc.PhoenixDriver
 import org.apache.phoenix.mapreduce.PhoenixInputFormat
 import org.apache.phoenix.mapreduce.util.PhoenixConfigurationUtil
+import org.apache.phoenix.query.HBaseFactoryProvider
 import org.apache.spark._
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.rdd.RDD
@@ -76,12 +77,11 @@ class PhoenixRDD(sc: SparkContext, table: String, columns: Seq[String],
 
   def getPhoenixConfiguration: Configuration = {
 
-    // This is just simply not serializable, so don't try, but clone it because
-    // PhoenixConfigurationUtil mutates it.
-    val config = HBaseConfiguration.create(conf)
+    val config = HBaseFactoryProvider.getConfigurationFactory.getConfiguration(conf);
 
     PhoenixConfigurationUtil.setInputClass(config, classOf[PhoenixRecordWritable])
     PhoenixConfigurationUtil.setInputTableName(config, table)
+    PhoenixConfigurationUtil.setPropertyPolicyProviderDisabled(config);
 
     if(!columns.isEmpty) {
       PhoenixConfigurationUtil.setSelectColumnNames(config, columns.toArray)

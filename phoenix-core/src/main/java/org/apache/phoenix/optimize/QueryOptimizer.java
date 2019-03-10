@@ -59,6 +59,7 @@ import org.apache.phoenix.parse.SelectStatement;
 import org.apache.phoenix.parse.TableName;
 import org.apache.phoenix.parse.TableNode;
 import org.apache.phoenix.parse.TableNodeVisitor;
+import org.apache.phoenix.query.KeyRange;
 import org.apache.phoenix.query.QueryServices;
 import org.apache.phoenix.query.QueryServicesOptions;
 import org.apache.phoenix.schema.ColumnNotFoundException;
@@ -323,17 +324,22 @@ public class QueryOptimizer {
                 
                 QueryPlan plan = compiler.compile();
 
-                boolean optimizedOrderBy = plan.getOrderBy().getOrderByExpressions().isEmpty() &&
-                        !dataPlan.getOrderBy().getOrderByExpressions().isEmpty();
+                boolean optimizedSort =
+                        plan.getOrderBy().getOrderByExpressions().isEmpty()
+                                && !dataPlan.getOrderBy().getOrderByExpressions().isEmpty()
+                                || plan.getGroupBy().isOrderPreserving()
+                                        && !dataPlan.getGroupBy().isOrderPreserving();
 
-                // If query doesn't have where clause and some of columns to project are missing
-                // in the index then we need to get missing columns from main table for each row in
-                // local index. It's like full scan of both local index and data table which is inefficient.
+                // If query doesn't have where clause, or the planner didn't add any (bound) scan ranges, and some of
+                // columns to project/filter are missing in the index then we need to get missing columns from main table
+                // for each row in local index. It's like full scan of both local index and data table which is inefficient.
                 // Then we don't use the index. If all the columns to project are present in the index 
                 // then we can use the index even the query doesn't have where clause.
-                // We'll use the index anyway if it allowed us to optimize an ORDER BY clause away.
-                if (index.getIndexType() == IndexType.LOCAL && indexSelect.getWhere() == null
-                        && !plan.getContext().getDataColumns().isEmpty() && !optimizedOrderBy) {
+                // We'll use the index anyway if it allowed us to avoid a sort operation.
+                if (index.getIndexType() == IndexType.LOCAL
+                        && (indexSelect.getWhere() == null
+                                || plan.getContext().getScanRanges().getBoundRanges().size() == 1)
+                        && !plan.getContext().getDataColumns().isEmpty() && !optimizedSort) {
                     return null;
                 }
                 indexTableRef = plan.getTableRef();
@@ -506,14 +512,24 @@ public class QueryOptimizer {
                 // For shared indexes (i.e. indexes on views and local indexes),
                 // a) add back any view constants as these won't be in the index, and
                 // b) ignore the viewIndexId which will be part of the row key columns.
-                int c = (boundCount2 + (table2.getViewIndexId() == null ? 0 : (boundRanges - 1))) -
-                        (boundCount1 + (table1.getViewIndexId() == null ? 0 : (boundRanges - 1)));
+                boundCount1 += table1.getViewIndexId() == null ? 0 : (boundRanges - 1);
+                boundCount2 += table2.getViewIndexId() == null ? 0 : (boundRanges - 1);
+                // Adjust for salting. Salting adds a bound range for each salt bucket.
+                // (but the sum of buckets cover the entire table)
+                boundCount1 -= plan1.getContext().getScanRanges().isSalted() ? 1 : 0;
+                boundCount2 -= plan2.getContext().getScanRanges().isSalted() ? 1 : 0;
+                int c = boundCount2 - boundCount1;
                 if (c != 0) return c;
                 if (plan1.getGroupBy() != null && plan2.getGroupBy() != null) {
                     if (plan1.getGroupBy().isOrderPreserving() != plan2.getGroupBy().isOrderPreserving()) {
                         return plan1.getGroupBy().isOrderPreserving() ? -1 : 1;
                     }
                 }
+
+                // Use the plan that has fewer "dataColumns" (columns that need to be merged in)
+                c = plan1.getContext().getDataColumns().size() - plan2.getContext().getDataColumns().size();
+                if (c != 0) return c;
+
                 // Use smaller table (table with fewest kv columns)
                 if (!useDataOverIndexHint || (table1.getType() == PTableType.INDEX && table2.getType() == PTableType.INDEX)) {
                     c = (table1.getColumns().size() - table1.getPKColumns().size()) - (table2.getColumns().size() - table2.getPKColumns().size());

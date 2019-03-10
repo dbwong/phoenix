@@ -47,6 +47,7 @@ import org.apache.phoenix.mapreduce.ImportPreUpsertKeyValueProcessor;
 import org.apache.phoenix.mapreduce.PhoenixInputFormat;
 import org.apache.phoenix.mapreduce.index.IndexScrutinyTool.OutputFormat;
 import org.apache.phoenix.mapreduce.index.IndexScrutinyTool.SourceTable;
+import org.apache.phoenix.query.QueryServices;
 import org.apache.phoenix.schema.PName;
 import org.apache.phoenix.schema.PTable;
 import org.apache.phoenix.schema.PTableKey;
@@ -120,6 +121,10 @@ public final class PhoenixConfigurationUtil {
     public static final String SCRUTINY_DATA_TABLE_NAME = "phoenix.mr.scrutiny.data.table.name";
 
     public static final String SCRUTINY_INDEX_TABLE_NAME = "phoenix.mr.scrutiny.index.table.name";
+
+    public static final String INDEX_TOOL_DATA_TABLE_NAME = "phoenix.mr.index_tool.data.table.name";
+
+    public static final String INDEX_TOOL_INDEX_TABLE_NAME = "phoenix.mr.index_tool.index.table.name";
 
     public static final String SCRUTINY_SOURCE_TABLE = "phoenix.mr.scrutiny.source.table";
 
@@ -211,6 +216,11 @@ public final class PhoenixConfigurationUtil {
         Preconditions.checkNotNull(configuration);
         Preconditions.checkNotNull(inputQuery);
         configuration.set(SELECT_STATEMENT, inputQuery);
+    }
+
+    public static void setPropertyPolicyProviderDisabled(final Configuration configuration) {
+        Preconditions.checkNotNull(configuration);
+        configuration.set(QueryServices.PROPERTY_POLICY_PROVIDER_ENABLED, "false");
     }
     
     public static void setSchemaType(Configuration configuration, final SchemaType schemaType) {
@@ -539,6 +549,16 @@ public final class PhoenixConfigurationUtil {
         Preconditions.checkNotNull(configuration);
         return configuration.get(SCRUTINY_INDEX_TABLE_NAME);
     }
+    public static void setIndexToolDataTableName(Configuration configuration, String qDataTableName) {
+        Preconditions.checkNotNull(configuration);
+        Preconditions.checkNotNull(qDataTableName);
+        configuration.set(INDEX_TOOL_DATA_TABLE_NAME, qDataTableName);
+    }
+
+    public static String getIndexToolDataTableName(Configuration configuration) {
+        Preconditions.checkNotNull(configuration);
+        return configuration.get(INDEX_TOOL_DATA_TABLE_NAME);
+    }
 
     public static void setScrutinyIndexTable(Configuration configuration, String qIndexTableName) {
         Preconditions.checkNotNull(configuration);
@@ -549,6 +569,17 @@ public final class PhoenixConfigurationUtil {
     public static SourceTable getScrutinySourceTable(Configuration configuration) {
         Preconditions.checkNotNull(configuration);
         return SourceTable.valueOf(configuration.get(SCRUTINY_SOURCE_TABLE));
+    }
+
+    public static void setIndexToolIndexTableName(Configuration configuration, String qIndexTableName) {
+        Preconditions.checkNotNull(configuration);
+        Preconditions.checkNotNull(qIndexTableName);
+        configuration.set(INDEX_TOOL_INDEX_TABLE_NAME, qIndexTableName);
+    }
+
+    public static String getIndexToolIndexTableName(Configuration configuration) {
+        Preconditions.checkNotNull(configuration);
+        return configuration.get(INDEX_TOOL_INDEX_TABLE_NAME);
     }
 
     public static void setScrutinySourceTable(Configuration configuration,
