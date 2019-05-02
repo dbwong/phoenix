@@ -21,6 +21,7 @@ import static org.apache.phoenix.query.QueryServicesOptions.DEFAULT_SPOOL_DIRECT
 import static org.apache.phoenix.query.QueryServicesOptions.withDefaults;
 
 import org.apache.curator.shaded.com.google.common.io.Files;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.regionserver.wal.IndexedWALEditCodec;
 import org.apache.phoenix.util.PhoenixRuntime;
 import org.apache.phoenix.util.ReadOnlyProps;
@@ -87,7 +88,11 @@ public final class QueryServicesTestImpl extends BaseQueryServicesImpl {
     public QueryServicesTestImpl(ReadOnlyProps defaultProps) {
         this(defaultProps, ReadOnlyProps.EMPTY_PROPS);
     }
-    
+
+    public static Configuration getDefaultTestConfiguration() {
+        return getDefaultServicesOptions().getConfiguration();
+    }
+
     private static QueryServicesOptions getDefaultServicesOptions() {
     	return withDefaults()
     	        .setSequenceCacheSize(DEFAULT_SEQUENCE_CACHE_SIZE)

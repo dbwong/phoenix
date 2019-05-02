@@ -33,7 +33,9 @@ public class DefaultGuidePostsCacheFactory implements GuidePostsCacheFactory {
             LOGGER.info("Using EmptyStatsLoader from DefaultGuidePostsCacheFactory");
             return new EmptyStatsLoader();
         }
-        return new StatsLoaderImpl(queryServices);
+        ConnectionQueryServicesStatsTableProvider provider = new ConnectionQueryServicesStatsTableProvider(
+                queryServices, readOnlyProps, config);
+        return new StatsLoaderImpl(provider);
     }
 
     @Override

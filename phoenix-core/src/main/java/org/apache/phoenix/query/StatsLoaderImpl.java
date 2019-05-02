@@ -1,8 +1,10 @@
 package org.apache.phoenix.query;
 
+import com.google.common.base.Optional;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.TableNotFoundException;
+import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.phoenix.jdbc.PhoenixDatabaseMetaData;
 import org.apache.phoenix.schema.stats.GuidePostsInfo;
@@ -20,12 +22,12 @@ import java.util.Objects;
  */
 class StatsLoaderImpl implements PhoenixStatsLoader {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(GuidePostsCacheImpl.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(PhoenixStatsLoader.class);
 
-    private final ConnectionQueryServices queryServices;
+    private final StatsTableProvider statsTableProvider;
 
-    public StatsLoaderImpl(ConnectionQueryServices queryServices){
-        this.queryServices = queryServices;
+    public StatsLoaderImpl(StatsTableProvider statsTableProvider){
+        this.statsTableProvider = statsTableProvider;
     }
 
     @Override
@@ -47,29 +49,37 @@ class StatsLoaderImpl implements PhoenixStatsLoader {
     public GuidePostsInfo loadStats(GuidePostsKey statsKey, GuidePostsInfo prevGuidepostInfo) throws Exception {
         assert(prevGuidepostInfo != null);
 
-        TableName tableName = SchemaUtil.getPhysicalName(
-                PhoenixDatabaseMetaData.SYSTEM_STATS_NAME_BYTES,
-                queryServices.getProps());
-        Table statsHTable = queryServices.getTable(tableName.getName());
+        Optional<Connection> connection = Optional.absent();
 
         try {
-            GuidePostsInfo guidePostsInfo = StatisticsUtil.readStatistics(statsHTable, statsKey,
-                    HConstants.LATEST_TIMESTAMP);
-            traceStatsUpdate(statsKey, guidePostsInfo);
-            return guidePostsInfo;
-        } catch (TableNotFoundException e) {
-            // On a fresh install, stats might not yet be created, don't warn about this.
-            LOGGER.debug("Unable to locate Phoenix stats table: " + tableName.toString(), e);
-            return prevGuidepostInfo;
-        } catch (IOException e) {
-            LOGGER.warn("Unable to read from stats table: " + tableName.toString(), e);
-            return prevGuidepostInfo;
-        } finally {
+            connection = statsTableProvider.openConnection();
+            Table statsHTable = statsTableProvider.getTable(connection);
+            String tableString = statsHTable.getName().getNameAsString();
+
             try {
-                statsHTable.close();
+                GuidePostsInfo guidePostsInfo = StatisticsUtil.readStatistics(statsHTable, statsKey,
+                        HConstants.LATEST_TIMESTAMP);
+                traceStatsUpdate(statsKey, guidePostsInfo);
+                return guidePostsInfo;
+            } catch (TableNotFoundException e) {
+                // On a fresh install, stats might not yet be created, don't warn about this.
+                LOGGER.debug("Unable to locate Phoenix stats table: " + tableString, e);
+                return prevGuidepostInfo;
             } catch (IOException e) {
-                // Log, but continue. We have our stats anyway now.
-                LOGGER.warn("Unable to close stats table: " + tableName.toString(), e);
+                LOGGER.warn("Unable to read from stats table: " + tableString, e);
+                return prevGuidepostInfo;
+            } finally {
+                try {
+                    statsHTable.close();
+                } catch (IOException e) {
+                    // Log, but continue. We have our stats anyway now.
+                    LOGGER.warn("Unable to close stats table: " + tableString, e);
+                }
+            }
+        } finally {
+            if (connection.isPresent()) {
+                connection.get().close();
+                LOGGER.warn("Unable to close stats connection.");
             }
         }
     }

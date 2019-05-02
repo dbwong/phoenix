@@ -20,9 +20,11 @@ import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.base.Ticker;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.phoenix.schema.stats.GuidePostsInfo;
 import org.apache.phoenix.schema.stats.GuidePostsKey;
+import org.apache.phoenix.util.EnvironmentEdgeManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -70,7 +72,14 @@ public class GuidePostsCacheImpl implements GuidePostsCache {
                 // Log removals at TRACE for debugging
                 .removalListener(new PhoenixStatsCacheRemovalListener())
                 // Automatically load the cache when entries need to be refreshed
+                .ticker(new EnvironmentalEdgeTicker())
                 .build(cacheLoader);
+    }
+
+    static class EnvironmentalEdgeTicker extends Ticker {
+        @Override public long read() {
+            return EnvironmentEdgeManager.currentTimeMillis();
+        }
     }
 
     /**

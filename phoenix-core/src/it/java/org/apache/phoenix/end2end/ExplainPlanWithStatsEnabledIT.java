@@ -19,6 +19,7 @@ package org.apache.phoenix.end2end;
 
 import static org.apache.phoenix.query.QueryServicesOptions.DEFAULT_USE_STATS_FOR_PARALLELIZATION;
 import static org.apache.phoenix.util.PhoenixRuntime.TENANT_ID_ATTRIB;
+import static org.apache.phoenix.util.TestUtil.TEST_PROPERTIES;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
@@ -29,15 +30,20 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Properties;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.phoenix.jdbc.PhoenixConnection;
 import org.apache.phoenix.jdbc.PhoenixResultSet;
 import org.apache.phoenix.mapreduce.util.PhoenixConfigurationUtil;
+import org.apache.phoenix.query.QueryServices;
+import org.apache.phoenix.query.QueryServicesTestImpl;
 import org.apache.phoenix.schema.PTable;
 import org.apache.phoenix.schema.PTableKey;
 import org.apache.phoenix.schema.TableNotFoundException;
@@ -47,46 +53,116 @@ import org.apache.phoenix.util.ByteUtil;
 import org.apache.phoenix.util.EnvironmentEdge;
 import org.apache.phoenix.util.EnvironmentEdgeManager;
 import org.apache.phoenix.util.PhoenixRuntime;
-import org.junit.BeforeClass;
+import org.apache.phoenix.util.PropertiesUtil;
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 
+import com.google.common.base.Optional;
 import com.google.common.collect.Lists;
 
 /**
  * This class has tests for asserting the bytes and rows information exposed in the explain plan
  * when statistics are enabled.
  */
+@RunWith(Parameterized.class)
 public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
 
+    private static final long STATS_UPDATE_FREQUENCY = 5l;
     private static String tableA;
     private static String tableB;
     private static String tableWithLargeGPWidth;
     private static String indexOnA;
     private static final long largeGpWidth = 2 * 1000 * 1000L;
 
-    @BeforeClass
-    public static void createTables() throws Exception {
-        tableA = generateUniqueName();
-        initDataAndStats(tableA, 20L);
-        tableB = generateUniqueName();
-        initDataAndStats(tableB, 20L);
-        tableWithLargeGPWidth = generateUniqueName();
-        initDataAndStats(tableWithLargeGPWidth, largeGpWidth);
-        indexOnA = generateUniqueName();
-        createIndex(indexOnA, tableA, 20);
+    private static final List<String> GUIDE_POSTS_CACHE_FACTORY_LIST =
+            Lists.newArrayList(
+                    "org.apache.phoenix.query.SingletonProviderGuidePostsCacheFactory",
+                    "org.apache.phoenix.query.DefaultGuidePostsCacheFactory");
+
+    @Parameters
+    public static Iterable<? extends String> guidePostsCacheFactoryStrings(){
+        return GUIDE_POSTS_CACHE_FACTORY_LIST;
     }
 
-    private static void createIndex(String indexName, String table, long guidePostWidth)
-            throws Exception {
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
-            conn.createStatement().execute(
-                "CREATE INDEX " + indexName + " ON " + table + " (c1.a) INCLUDE (c2.b) ");
-            conn.createStatement().execute("UPDATE STATISTICS " + indexName);
+    private String cacheFactoryString;
+
+    public ExplainPlanWithStatsEnabledIT(String cacheFactoryString){
+        this.cacheFactoryString = cacheFactoryString;
+    }
+
+    private boolean init = false;
+
+    public void doOnce() throws Exception {
+        if(!init){
+            tableA = generateUniqueName();
+            initDataAndStats(tableA, 20L);
+            tableB = generateUniqueName();
+            initDataAndStats(tableB, 20L);
+            tableWithLargeGPWidth = generateUniqueName();
+            initDataAndStats(tableWithLargeGPWidth, largeGpWidth);
+            indexOnA = generateUniqueName();
+            createIndex(indexOnA, tableA, 20);
+            init = true;
         }
     }
 
-    private static void initDataAndStats(String tableName, Long guidePostWidth) throws Exception {
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+    @Before
+    public void init() throws Exception {
+        doOnce();
+    }
+
+    private Connection getQueryConnection() throws SQLException {
+        return getQueryConnection(null);
+    }
+
+    private Connection getQueryConnection(String tenantId) throws SQLException {
+        // Change the url to use the real phoenix driver
+        String url = getUrl();
+        url = url.replace(";" + PhoenixRuntime.PHOENIX_TEST_DRIVER_URL_PARAM, "");
+
+        //As there is a map of connections in the phoenix driver need to differentiate the url to
+        //pick different QueryServices
+        url = url + PhoenixRuntime.JDBC_PROTOCOL_SEPARATOR + "GuidePostId" + GUIDE_POSTS_CACHE_FACTORY_LIST.indexOf(cacheFactoryString);
+
+        if(tenantId != null) {
+            url = url + ';' + TENANT_ID_ATTRIB + '=' + tenantId + ";";
+        }
+
+        //Load defaults from QueryServicesTestImpl
+        Properties props = PropertiesUtil.deepCopy(TEST_PROPERTIES);
+        Configuration testConfiguration = QueryServicesTestImpl.getDefaultTestConfiguration();
+        props.putAll(testConfiguration.getValByRegex(".*"));
+
+        //Parameterized URL
+        props.put(QueryServices.GUIDE_POSTS_CACHE_FACTORY_CLASS,cacheFactoryString);
+
+        //Stats Connection Props
+        props.put(QueryServices.STATS_GUIDEPOST_WIDTH_BYTES_ATTRIB, Long.toString(20));
+        props.put(QueryServices.STATS_UPDATE_FREQ_MS_ATTRIB, Long.toString(STATS_UPDATE_FREQUENCY));
+        props.put(QueryServices.MAX_SERVER_METADATA_CACHE_TIME_TO_LIVE_MS_ATTRIB, Long.toString(5));
+        props.put(QueryServices.USE_STATS_FOR_PARALLELIZATION, Boolean.toString(true));
+
+
+
+        Connection conn = DriverManager.getConnection(url, props);
+        return conn;
+    }
+
+    private void createIndex(String indexName, String table, long guidePostWidth)
+            throws Exception {
+        try (Connection conn = getQueryConnection()) {
+            conn.createStatement().execute(
+                "CREATE INDEX " + indexName + " ON " + table + " (c1.a) INCLUDE (c2.b) ");
+            conn.createStatement().execute("UPDATE STATISTICS " + indexName);
+            conn.commit();
+        }
+    }
+
+    private void initDataAndStats(String tableName, Long guidePostWidth) throws Exception {
+        try (Connection conn = getQueryConnection()) {
             conn.createStatement()
                     .execute("CREATE TABLE " + tableName
                             + " (k INTEGER PRIMARY KEY, c1.a bigint, c2.b bigint)"
@@ -103,12 +179,8 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
             conn.createStatement().execute("upsert into " + tableName + " values (109,2,4)");
             conn.commit();
             conn.createStatement().execute("UPDATE STATISTICS " + tableName);
+            conn.commit();
         }
-    }
-
-    private static Connection getTenantConnection(String tenantId) throws SQLException {
-        String url = getUrl() + ';' + TENANT_ID_ATTRIB + '=' + tenantId;
-        return DriverManager.getConnection(url);
     }
 
     @Test
@@ -116,7 +188,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String sql = "SELECT * FROM " + tableA + " where k >= ?";
         List<Object> binds = Lists.newArrayList();
         binds.add(200);
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 0L, info.estimatedBytes);
             assertEquals((Long) 0L, info.estimatedRows);
@@ -129,7 +201,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String sql = "SELECT * FROM " + tableA + " where k in (? ,?) limit 4";
         List<Object> binds = Lists.newArrayList();
         binds.add(103); binds.add(104);
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 200L, info.estimatedBytes);
             assertEquals((Long) 2L, info.estimatedRows);
@@ -143,7 +215,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String noIndexSQL = "SELECT /*+ NO_INDEX */ * FROM " + tableA + " where c1.a in (?,?) limit 3";
         List<Object> binds = Lists.newArrayList();
         binds.add(1); binds.add(2);
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 264L, info.estimatedBytes);
             assertEquals((Long) 3L, info.estimatedRows);
@@ -160,7 +232,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
     public void testBytesRowsForSelectWithLimitIgnored() throws Exception {
         String sql = "SELECT * FROM " + tableA + " where (c1.a > c2.b) limit 1";
         List<Object> binds = Lists.newArrayList();
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 691L, info.estimatedBytes);
             assertEquals((Long) 10L, info.estimatedRows);
@@ -173,7 +245,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String sql = "SELECT * FROM " + tableB + " where k >= ?";
         List<Object> binds = Lists.newArrayList();
         binds.add(99);
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 634L, info.estimatedBytes);
             assertEquals((Long) 10L, info.estimatedRows);
@@ -186,7 +258,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String sql = "SELECT * FROM " + tableA + " where c1.a >= ?";
         List<Object> binds = Lists.newArrayList();
         binds.add(0);
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 691L, info.estimatedBytes);
             assertEquals((Long) 10L, info.estimatedRows);
@@ -198,7 +270,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
     public void testBytesRowsForUnion() throws Exception {
         String sql =
                 "SELECT /*+ NO_INDEX */ * FROM " + tableA + " UNION ALL SELECT * FROM " + tableB;
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             Estimate info = getByteRowEstimates(conn, sql, Lists.newArrayList());
             assertEquals((Long) (2 * 634L), info.estimatedBytes);
             assertEquals((Long) (2 * 10L), info.estimatedRows);
@@ -213,7 +285,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String sql =
                 "SELECT /*+ NO_INDEX */ * FROM " + tableA + " UNION ALL SELECT * FROM " + tableB
                         + " UNION ALL SELECT * FROM " + tableWithLargeGPWidth;
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             Estimate info = getByteRowEstimates(conn, sql, Lists.newArrayList());
             assertEquals((Long) (2 * 634 + largeGpWidth), info.estimatedBytes);
             assertTrue(info.estimateInfoTs > 0);
@@ -225,7 +297,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String sql =
                 "SELECT ta.c1.a, ta.c2.b FROM " + tableA + " ta JOIN " + tableB
                         + " tb ON ta.k = tb.k";
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             Estimate info = getByteRowEstimates(conn, sql, Lists.newArrayList());
             assertEquals((Long) (634L), info.estimatedBytes);
             assertEquals((Long) (10L), info.estimatedRows);
@@ -238,7 +310,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String sql =
                 "SELECT /*+ NO_INDEX USE_SORT_MERGE_JOIN */ ta.c1.a, ta.c2.b FROM " + tableA
                         + " ta JOIN " + tableB + " tb ON ta.k = tb.k";
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             Estimate info = getByteRowEstimates(conn, sql, Lists.newArrayList());
             assertEquals((Long) (2 * 634L), info.estimatedBytes);
             assertEquals((Long) (2 * 10L), info.estimatedRows);
@@ -251,7 +323,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String sql = "SELECT count(*) FROM " + tableA + " where k >= ?";
         List<Object> binds = Lists.newArrayList();
         binds.add(99);
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 634L, info.estimatedBytes);
             assertEquals((Long) 10L, info.estimatedRows);
@@ -263,7 +335,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
     public void testBytesRowsForUpsertSelectServerSide() throws Exception {
         String sql = "UPSERT INTO " + tableA + " SELECT * FROM " + tableB;
         List<Object> binds = Lists.newArrayList();
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             conn.setAutoCommit(true);
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 634L, info.estimatedBytes);
@@ -276,7 +348,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
     public void testBytesRowsForUpsertSelectClientSide() throws Exception {
         String sql = "UPSERT INTO " + tableB + " SELECT * FROM " + tableB;
         List<Object> binds = Lists.newArrayList();
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             conn.setAutoCommit(false);
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 634L, info.estimatedBytes);
@@ -292,7 +364,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         binds.add(99);
         binds.add(99);
         binds.add(99);
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 0L, info.estimatedBytes);
             assertEquals((Long) 0L, info.estimatedRows);
@@ -305,7 +377,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String sql = "DELETE FROM " + tableA + " where k >= ?";
         List<Object> binds = Lists.newArrayList();
         binds.add(99);
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             conn.setAutoCommit(true);
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 634L, info.estimatedBytes);
@@ -319,7 +391,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String sql = "DELETE FROM " + tableA + " where k >= ? LIMIT 2";
         List<Object> binds = Lists.newArrayList();
         binds.add(99);
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             conn.setAutoCommit(false);
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 200L, info.estimatedBytes);
@@ -333,7 +405,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String sql = "DELETE FROM " + tableA + " where k = ?";
         List<Object> binds = Lists.newArrayList();
         binds.add(100);
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             conn.setAutoCommit(false);
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 0L, info.estimatedBytes);
@@ -346,7 +418,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
     public void testBytesRowsForSelectExecutedSerially() throws Exception {
         String sql = "SELECT * FROM " + tableA + " LIMIT 2";
         List<Object> binds = Lists.newArrayList();
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             conn.setAutoCommit(false);
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 176L, info.estimatedBytes);
@@ -404,7 +476,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
 
     @Test
     public void testSettingUseStatsForParallelizationProperty() throws Exception {
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             String table = generateUniqueName();
             String ddl =
                     "CREATE TABLE " + table
@@ -465,14 +537,16 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String tenant3 = "tenant3";
         String tenant4 = "tenant4";
         MyClock clock = new MyClock(1000);
-        
+
         createMultitenantTableAndViews(tenant1View, tenant2View, tenant3View, tenant4View, tenant1, tenant2,
             tenant3, tenant4, multiTenantBaseTable, clock);
+
         // query the entire multitenant table
         String sql = "SELECT * FROM " + multiTenantBaseTable + " WHERE ORGID >= ?";
         List<Object> binds = Lists.newArrayList();
         binds.add("tenant0");
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+
+        try (Connection conn = getQueryConnection()) {
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 681L, info.estimatedBytes);
             assertEquals((Long) 10L, info.estimatedRows);
@@ -481,7 +555,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         binds.clear();
         long prevTenantBytes;
         // query tenant1 view
-        try (Connection conn = getTenantConnection(tenant1)) {
+        try (Connection conn = getQueryConnection(tenant1)) {
             sql = "SELECT * FROM " + tenant1View;
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 119L, info.estimatedBytes);
@@ -489,7 +563,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
             assertNull(info.estimateInfoTs); // unknown/null because scan occurs in first region because of start key versus slightly larger region boundary
         }
         // query tenant2 view
-        try (Connection conn = getTenantConnection(tenant2)) {
+        try (Connection conn = getQueryConnection(tenant2)) {
             sql = "SELECT * FROM " + tenant2View;
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) (prevTenantBytes=119L), info.estimatedBytes);
@@ -497,7 +571,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
             assertEquals((Long) clock.currentTime(), info.estimateInfoTs);
         }
         // query tenant3 view
-        try (Connection conn = getTenantConnection(tenant3)) {
+        try (Connection conn = getQueryConnection(tenant3)) {
             sql = "SELECT * FROM " + tenant3View;
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 443L, info.estimatedBytes);
@@ -514,7 +588,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         try {
             EnvironmentEdgeManager.injectEdge(clock);
             // Update tenant1 view
-            try (Connection conn = getTenantConnection(tenant2)) {
+            try (Connection conn = getQueryConnection(tenant2)) {
                 // upsert a few rows for tenantView
                 clock.setAdvance(false);
                 conn.createStatement()
@@ -543,14 +617,14 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
             EnvironmentEdgeManager.reset();
         }
         // Now check estimates again for tenantView1 and tenantView3. They should stay the same.
-        try (Connection conn = getTenantConnection(tenant1)) {
+        try (Connection conn = getQueryConnection(tenant1)) {
             sql = "SELECT * FROM " + tenant1View;
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 119L, info.estimatedBytes);
             assertEquals((Long) 2L, info.estimatedRows);
             assertNull(info.estimateInfoTs);
         }
-        try (Connection conn = getTenantConnection(tenant3)) {
+        try (Connection conn = getQueryConnection(tenant3)) {
             sql = "SELECT * FROM " + tenant3View;
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 443L, info.estimatedBytes);
@@ -564,7 +638,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
          */
         binds.clear();
         binds.add("tenant0");
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             sql = "SELECT * FROM " + multiTenantBaseTable + " WHERE ORGID >= ?";
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) 1167L, info.estimatedBytes);
@@ -573,7 +647,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         }
         // query tenant4 view
         binds.clear();
-        try (Connection conn = getTenantConnection(tenant4)) {
+        try (Connection conn = getQueryConnection(tenant4)) {
             sql = "SELECT * FROM " + tenant4View;
             Estimate info = getByteRowEstimates(conn, sql, binds);
             assertEquals((Long) (prevTenantBytes=0L), info.estimatedBytes);
@@ -584,7 +658,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         try {
             EnvironmentEdgeManager.injectEdge(clock);
             // Update tenant4 view
-            try (Connection conn = getTenantConnection(tenant4)) {
+            try (Connection conn = getQueryConnection(tenant4)) {
                 // upsert a few rows for tenantView
                 conn.createStatement()
                     .executeUpdate("UPSERT INTO " + tenant4View + " VALUES (6, 17,17)");
@@ -614,7 +688,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
     @Test // See https://issues.apache.org/jira/browse/PHOENIX-4287
     public void testEstimatesForAggregateQueries() throws Exception {
         String tableName = generateUniqueName();
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             int guidePostWidth = 20;
             String ddl =
                     "CREATE TABLE " + tableName + " (k INTEGER PRIMARY KEY, a bigint, b bigint)"
@@ -634,7 +708,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
             conn.createStatement().execute("UPDATE STATISTICS " + tableName + "");
         }
         List<Object> binds = Lists.newArrayList();
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             String sql = "SELECT COUNT(*) " + " FROM " + tableName;
             // We don't have the use stats for parallelization property
             // set on the table. In this case, we end up defaulting to the
@@ -721,7 +795,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
 
     private void testSelectQueriesWithFilters(boolean useStatsForParallelization) throws Exception {
         String tableName = generateUniqueName();
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             int guidePostWidth = 20;
             String ddl =
                     "CREATE TABLE " + tableName + " (k INTEGER PRIMARY KEY, a bigint, b bigint)"
@@ -742,7 +816,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
             conn.createStatement().execute("UPDATE STATISTICS " + tableName + "");
         }
         List<Object> binds = Lists.newArrayList();
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             // query whose start key is before any data
             String sql = "SELECT a FROM " + tableName + " WHERE K >= 99";
             ResultSet rs = conn.createStatement().executeQuery(sql);
@@ -862,7 +936,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         }
     }
 
-    private static void createMultitenantTableAndViews(String tenant1View, String tenant2View,
+    private void createMultitenantTableAndViews(String tenant1View, String tenant2View,
             String tenant3View, String tenant4View, String tenant1, String tenant2, String tenant3, String tenant4,
             String multiTenantTable, MyClock clock) throws Exception {
         byte[][] splits =
@@ -879,7 +953,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         // Use our own clock to get rows created with our controlled timestamp
         try {
             EnvironmentEdgeManager.injectEdge(clock);
-            try (Connection conn = DriverManager.getConnection(getUrl())) {
+            try (Connection conn = getQueryConnection()) {
                 PreparedStatement stmt = conn.prepareStatement(ddl + " SPLIT ON (?,?,?,?)");
                 for (int i = 0; i < splits.length; i++) {
                     stmt.setBytes(i+1, splits[i]);
@@ -912,22 +986,22 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
                 conn.commit();
             }
             clock.setAdvance(false);
-            try (Connection conn = getTenantConnection(tenant1)) {
+            try (Connection conn = getQueryConnection(tenant1)) {
                 conn.createStatement().execute(
                     "CREATE VIEW " + tenant1View + " AS SELECT * FROM " + multiTenantTable);
                 conn.createStatement().execute("UPDATE STATISTICS " + tenant1View);
             }
-            try (Connection conn = getTenantConnection(tenant2)) {
+            try (Connection conn = getQueryConnection(tenant2)) {
                 conn.createStatement().execute(
                     "CREATE VIEW " + tenant2View + " AS SELECT * FROM " + multiTenantTable);
                 conn.createStatement().execute("UPDATE STATISTICS " + tenant2View);
             }
-            try (Connection conn = getTenantConnection(tenant3)) {
+            try (Connection conn = getQueryConnection(tenant3)) {
                 conn.createStatement().execute(
                     "CREATE VIEW " + tenant3View + " AS SELECT * FROM " + multiTenantTable);
                 conn.createStatement().execute("UPDATE STATISTICS " + tenant3View);
             }
-            try (Connection conn = getTenantConnection(tenant4)) {
+            try (Connection conn = getQueryConnection(tenant4)) {
                 conn.createStatement().execute(
                     "CREATE VIEW " + tenant4View + " AS SELECT * FROM " + multiTenantTable);
             }
@@ -973,7 +1047,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
                         + " (orgId CHAR(15) NOT NULL, pk2 CHAR(3) NOT NULL, a bigint, b bigint CONSTRAINT PK PRIMARY KEY "
                         + "(ORGID, PK2)) MULTI_TENANT=true, GUIDE_POSTS_WIDTH=20";
         createTestTable(getUrl(), ddl, null, null);
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             // split such that some data for view2 resides on region of view1
             try (Admin admin =
                     conn.unwrap(PhoenixConnection.class).getQueryServices().getAdmin()) {
@@ -1003,17 +1077,17 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
                 "upsert into " + multiTenantTable + " values ('" + tenantId2 + "','00F',8,8)");
             conn.commit();
         }
-        try (Connection conn = getTenantConnection(tenantId1)) {
+        try (Connection conn = getQueryConnection(tenantId1)) {
             conn.createStatement().execute(
                 "CREATE VIEW " + tenant1View + " AS SELECT * FROM " + multiTenantTable);
         }
-        try (Connection conn = getTenantConnection(tenantId2)) {
+        try (Connection conn = getQueryConnection(tenantId2)) {
             conn.createStatement().execute(
                 "CREATE VIEW " + tenant2View + " AS SELECT * FROM " + multiTenantTable);
         }
         String sql = "";
         List<Object> binds = Lists.newArrayList();
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             /*
              * I have seen compaction running and generating stats for the second region of
              * tenant2View So let's disable compaction on the table, delete any stats we have
@@ -1030,11 +1104,11 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
             conn.unwrap(PhoenixConnection.class).getQueryServices().clearCache();
         }
         // Now let's run update stats on tenant1View
-        try (Connection conn = getTenantConnection(tenantId1)) {
+        try (Connection conn = getQueryConnection(tenantId1)) {
             conn.createStatement().execute("UPDATE STATISTICS " + tenant1View);
         }
         // query tenant2 view
-        try (Connection conn = getTenantConnection(tenantId2)) {
+        try (Connection conn = getQueryConnection(tenantId2)) {
             sql = "SELECT * FROM " + tenant2View;
 
             Estimate info = getByteRowEstimates(conn, sql, binds);
@@ -1066,7 +1140,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
 
     private void testIndexesInheritUseStatsPropFromParentTable(boolean useStats) throws Exception {
         String baseTable = generateUniqueName();
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             String ddl =
                     "CREATE TABLE " + baseTable
                             + " (k INTEGER PRIMARY KEY, a bigint, b bigint, c bigint) GUIDE_POSTS_WIDTH=20, USE_STATS_FOR_PARALLELIZATION="
@@ -1188,7 +1262,7 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
     private void testUseStatsForParallelizationOnSaltedTable(boolean useStatsFlag, boolean salted)
             throws SQLException {
         String tableName = generateUniqueName();
-        Connection conn = DriverManager.getConnection(getUrl());
+        Connection conn = getQueryConnection();
         conn.createStatement().execute(
             "create table " + tableName + "(k varchar not null primary key, v varchar) "
                     + (salted ? " SALT_BUCKETS=2," : "") + " USE_STATS_FOR_PARALLELIZATION="
@@ -1219,12 +1293,12 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
         String tenantViewName = generateUniqueName();
         String viewIndexName = generateUniqueName();
         boolean useStats = !DEFAULT_USE_STATS_FOR_PARALLELIZATION;
-        try (Connection conn = DriverManager.getConnection(getUrl())) {
+        try (Connection conn = getQueryConnection()) {
             conn.createStatement()
                     .execute("create table " + tableName
                             + "(tenantId CHAR(15) NOT NULL, pk1 integer NOT NULL, v varchar CONSTRAINT PK PRIMARY KEY "
                             + "(tenantId, pk1)) MULTI_TENANT=true");
-            try (Connection tenantConn = getTenantConnection("tenant1")) {
+            try (Connection tenantConn = getQueryConnection("tenant1")) {
                 conn.createStatement().execute("CREATE VIEW " + viewName + " AS SELECT * FROM " + tableName);
                 conn.createStatement().execute("CREATE INDEX " + viewIndexName + " on " + viewName + " (v) ");
                 tenantConn.createStatement().execute("CREATE VIEW " + tenantViewName + " AS SELECT * FROM " + viewName);
@@ -1248,4 +1322,32 @@ public class ExplainPlanWithStatsEnabledIT extends ParallelStatsEnabledIT {
                         .getStatsForParallelizationProp(tenantConn.unwrap(PhoenixConnection.class), viewIndex));
     }
 
+
+    private void printStatsTable(Optional<String> table) throws Exception{
+        {
+            String queryStats = "SELECT * FROM SYSTEM.STATS";
+            /*
+            PHYSICAL_NAME  + " VARCHAR NOT NULL," +
+            COLUMN_FAMILY + " VARCHAR," +
+            GUIDE_POST_KEY  + " VARBINARY," +
+            GUIDE_POSTS_WIDTH + " BIGINT," +
+            LAST_STATS_UPDATE_TIME+ " DATE, "+
+            GUIDE_POSTS_ROW_COUNT+ " BIGINT
+             */
+            try (Connection conn = getQueryConnection()) {
+                ResultSet rs = conn.createStatement().executeQuery(queryStats);
+                while(rs.next()){
+                    String rowString = String.format("PHYSICAL_NAME %s CF %s GP_KEY %s GP_WIDTH %s UPDATE_TIME %s GP_ROWS %s",
+                            rs.getString(1),
+                            rs.getString(2),
+                            Arrays.toString(rs.getBytes(3)),
+                            Long.toString(rs.getLong(4)),
+                            rs.getDate(5),
+                            Long.toString(rs.getLong(6))
+                            );
+                    System.out.println(rowString);
+                }
+            }
+        }
+    }
 }
