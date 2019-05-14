@@ -43,7 +43,9 @@ public class SingletonProviderGuidePostsCacheFactory implements GuidePostsCacheF
                 LOGGER.info("Using EmptyStatsLoader from " + SingletonProviderGuidePostsCacheFactory.class.getName());
                 phoenixStatsLoader = new EmptyStatsLoader();
             } else {
-                StatsTableProvider provider = new TransientConnectionStatsTableProvider(readOnlyProps, config);
+                StatsTableProvider provider = new TransientConnectionStatsTableProvider(
+                        HBaseFactoryProvider.getHConnectionFactory(), HBaseFactoryProvider.getHTableFactory(),
+                        readOnlyProps, config);
                 phoenixStatsLoader = new StatsLoaderImpl(provider);
             }
         }
