@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
+import com.google.common.base.Optional;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.filter.Filter;
@@ -54,8 +55,8 @@ import com.google.common.collect.Lists;
 public class ScanRanges {
     private static final List<List<KeyRange>> EVERYTHING_RANGES = Collections.<List<KeyRange>>emptyList();
     private static final List<List<KeyRange>> NOTHING_RANGES = Collections.<List<KeyRange>>singletonList(Collections.<KeyRange>singletonList(KeyRange.EMPTY_RANGE));
-    public static final ScanRanges EVERYTHING = new ScanRanges(null,ScanUtil.SINGLE_COLUMN_SLOT_SPAN,EVERYTHING_RANGES, KeyRange.EVERYTHING_RANGE, false, false, null, null);
-    public static final ScanRanges NOTHING = new ScanRanges(null,ScanUtil.SINGLE_COLUMN_SLOT_SPAN,NOTHING_RANGES, KeyRange.EMPTY_RANGE, false, false, null, null);
+    public static final ScanRanges EVERYTHING = new ScanRanges(null,ScanUtil.SINGLE_COLUMN_SLOT_SPAN,EVERYTHING_RANGES, KeyRange.EVERYTHING_RANGE, false, false, null, null, null);
+    public static final ScanRanges NOTHING = new ScanRanges(null,ScanUtil.SINGLE_COLUMN_SLOT_SPAN,NOTHING_RANGES, KeyRange.EMPTY_RANGE, false, false, null, null, null);
     private static final Scan HAS_INTERSECTION = new Scan();
 
     public static ScanRanges createPointLookup(List<KeyRange> keys) {
@@ -73,9 +74,14 @@ public class ScanRanges {
     }
 
     public static ScanRanges create(RowKeySchema schema, List<List<KeyRange>> ranges, int[] slotSpan, Integer nBuckets, boolean useSkipScan, int rowTimestampColIndex) {
+        return create(schema,ranges,slotSpan,nBuckets,useSkipScan,rowTimestampColIndex,Optional.absent());
+    }
+
+    public static ScanRanges create(RowKeySchema schema, List<List<KeyRange>> ranges, int[] slotSpan, Integer nBuckets, boolean useSkipScan, int rowTimestampColIndex, Optional<byte[]> scanMinOffset) {
         int offset = nBuckets == null ? 0 : SaltingUtil.NUM_SALTING_BYTES;
         int nSlots = ranges.size();
-        if (nSlots == offset) {
+
+        if (nSlots == offset && !scanMinOffset.isPresent()) {
             return EVERYTHING;
         } else if ((nSlots == 1 + offset && ranges.get(offset).size() == 1 && ranges.get(offset).get(0) == KeyRange.EMPTY_RANGE)) {
             return NOTHING;
@@ -83,6 +89,8 @@ public class ScanRanges {
         TimeRange rowTimestampRange = getRowTimestampColumnRange(ranges, schema, rowTimestampColIndex);
         boolean isPointLookup = isPointLookup(schema, ranges, slotSpan, useSkipScan);
         if (isPointLookup) {
+            //TODO: Handle Offset for point lookups may have to prune based on it the set of keyRanges
+
             // TODO: consider keeping original to use for serialization as it would be smaller?
             List<byte[]> keys = ScanRanges.getPointKeys(ranges, slotSpan, schema, nBuckets);
             List<KeyRange> keyRanges = Lists.newArrayListWithExpectedSize(keys.size());
@@ -108,6 +116,7 @@ public class ScanRanges {
                 slotSpan = new int[] {schema.getMaxFields()-1};
             }
         }
+
         List<List<KeyRange>> sortedRanges = Lists.newArrayListWithExpectedSize(ranges.size());
         for (int i = 0; i < ranges.size(); i++) {
             List<KeyRange> sorted = Lists.newArrayList(ranges.get(i));
@@ -134,13 +143,23 @@ public class ScanRanges {
             if (minKey.length <= offset) {
                 minKey = KeyRange.UNBOUND;
             }
+
+            //Handle the offset by pushing it into the scanRange
+            if(scanMinOffset.isPresent()){
+
+                //If the offset is more selective than the existing ranges
+                if(Bytes.BYTES_COMPARATOR.compare(scanMinOffset.get(),minKey) > 0){
+                    minKey=scanMinOffset.get();
+                }
+            }
+
             scanRange = KeyRange.getKeyRange(minKey, maxKey);
         }
 
         if (scanRange == KeyRange.EMPTY_RANGE) {
             return NOTHING;
         }
-        return new ScanRanges(schema, slotSpan, sortedRanges, scanRange, useSkipScan, isPointLookup, nBuckets, rowTimestampRange);
+        return new ScanRanges(schema, slotSpan, sortedRanges, scanRange, useSkipScan, isPointLookup, nBuckets, rowTimestampRange, scanMinOffset.orNull());
     }
 
     private SkipScanFilter filter;
@@ -152,13 +171,17 @@ public class ScanRanges {
     private final boolean useSkipScanFilter;
     private final KeyRange scanRange;
     private final TimeRange rowTimestampRange;
+    private final byte[] scanMinOffset;
+    //TODO: Local variable for storing we have offset
 
-    private ScanRanges (RowKeySchema schema, int[] slotSpan, List<List<KeyRange>> ranges, KeyRange scanRange, boolean useSkipScanFilter, boolean isPointLookup, Integer bucketNum, TimeRange rowTimestampRange) {
+
+    private ScanRanges (RowKeySchema schema, int[] slotSpan, List<List<KeyRange>> ranges, KeyRange scanRange, boolean useSkipScanFilter, boolean isPointLookup, Integer bucketNum, TimeRange rowTimestampRange, byte[] scanMinOffset) {
         this.isPointLookup = isPointLookup;
         this.isSalted = bucketNum != null;
         this.useSkipScanFilter = useSkipScanFilter;
         this.scanRange = scanRange;
         this.rowTimestampRange = rowTimestampRange;
+        this.scanMinOffset = scanMinOffset;
         
         if (isSalted && !isPointLookup) {
             ranges.set(0, SaltingUtil.generateAllSaltingRanges(bucketNum));
@@ -424,7 +447,7 @@ public class ScanRanges {
     }
 
     public boolean isEverything() {
-        return this == EVERYTHING || ranges.get(0).get(0) == KeyRange.EVERYTHING_RANGE;
+        return this == EVERYTHING || (!ranges.isEmpty() && ranges.get(0).get(0) == KeyRange.EVERYTHING_RANGE);
     }
 
     public boolean isDegenerate() {

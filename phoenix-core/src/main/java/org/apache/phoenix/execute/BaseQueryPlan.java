@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.google.common.base.Optional;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.HConstants;
@@ -120,7 +121,7 @@ public abstract class BaseQueryPlan implements QueryPlan {
     protected Long estimatedSize;
     protected Long estimateInfoTimestamp;
     private boolean getEstimatesCalled;
-    
+    protected boolean isApplicable = true;
 
     protected BaseQueryPlan(
             StatementContext context, FilterableStatement statement, TableRef table,
@@ -261,7 +262,8 @@ public abstract class BaseQueryPlan implements QueryPlan {
         PTable table = tableRef.getTable();
         
         if (dynamicFilter != null) {
-            WhereCompiler.compile(context, statement, null, Collections.singletonList(dynamicFilter), null);
+            WhereCompiler.compile(context, statement, null, Collections.singletonList(dynamicFilter), null,
+                    Optional.absent());
         }
         
         if (OrderBy.REV_ROW_KEY_ORDER_BY.equals(orderBy)) {
@@ -554,6 +556,14 @@ public abstract class BaseQueryPlan implements QueryPlan {
             getEstimates();
         }
         return estimateInfoTimestamp;
+    }
+
+    public boolean isApplicable(){
+        return isApplicable;
+    }
+
+    public void setApplicable(boolean isApplicable){
+        this.isApplicable = isApplicable;
     }
 
     private void getEstimates() throws SQLException {

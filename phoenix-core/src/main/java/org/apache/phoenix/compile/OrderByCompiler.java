@@ -118,7 +118,7 @@ public class OrderByCompiler {
                                   SelectStatement statement,
                                   GroupBy groupBy,
                                   Integer limit,
-                                  Integer offset,
+                                  CompiledOffset offset,
                                   RowProjector rowProjector,
                                   QueryPlan innerQueryPlan,
                                   Expression whereExpression) throws SQLException {
@@ -192,6 +192,15 @@ public class OrderByCompiler {
             }
             compiler.reset();
         }
+
+        //If we are not ordered we shouldn't be using RVC Offset
+        //I think this makes sense for the pagination case but perhaps we can relax this for
+        //other use cases.
+        //Note If the table is salted we still mark as row ordered in this code path
+        if(offset.getByteOffset().isPresent() && orderByExpressions.isEmpty()){
+            throw new SQLException("Do not allow non ORDER BY with RVC OFFSET");
+        }
+
         // we can remove ORDER BY clauses in case of only COUNT(DISTINCT...) clauses
         if (orderByExpressions.isEmpty() || groupBy.isUngroupedAggregate()) {
             return OrderBy.EMPTY_ORDER_BY;
@@ -209,13 +218,19 @@ public class OrderByCompiler {
                         && context.getCurrentTable().getTable().getType() != PTableType.PROJECTED
                         && context.getCurrentTable().getTable().getType() != PTableType.SUBQUERY
                         && !statement.getHint().hasHint(Hint.FORWARD_SCAN)) {
+                    if(offset.getByteOffset().isPresent()){
+                        throw new SQLException("Do not allow non-pk ORDER BY with RVC OFFSET");
+                    }
                     return OrderBy.REV_ROW_KEY_ORDER_BY;
                 }
             } else {
                 return OrderBy.FWD_ROW_KEY_ORDER_BY;
             }
         }
-
+        //If we were in row order this would be optimized out above
+        if(offset.getByteOffset().isPresent()){
+            throw new SQLException("Do not allow non-pk ORDER BY with RVC OFFSET");
+        }
         return new OrderBy(Lists.newArrayList(orderByExpressions.iterator()));
     }
 

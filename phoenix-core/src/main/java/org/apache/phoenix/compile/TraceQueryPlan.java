@@ -295,4 +295,9 @@ public class TraceQueryPlan implements QueryPlan {
     public List<OrderBy> getOutputOrderBys() {
         return Collections.<OrderBy> emptyList();
     }
+
+    @Override
+    public boolean isApplicable() {
+        return true;
+    }
 }

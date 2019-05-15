@@ -147,7 +147,6 @@ public enum SQLExceptionCode {
     }),
     ORDER_BY_ARRAY_NOT_SUPPORTED(515, "42893", "ORDER BY of an array type is not allowed."),
     NON_EQUALITY_ARRAY_COMPARISON(516, "42894", "Array types may only be compared using = or !=."),
-
     /**
      *  Invalid Transaction State (errorcode 05, sqlstate 25)
      */
@@ -421,6 +420,9 @@ public enum SQLExceptionCode {
     CONCURRENT_UPGRADE_IN_PROGRESS(2010, "INT12", ""),
     UPGRADE_REQUIRED(2011, "INT13", ""),
     UPGRADE_NOT_REQUIRED(2012, "INT14", ""),
+
+    ROW_VALUE_CONSTUCTOR_OFFSET_NOT_COERCIBLE(2013, "INT15", "Row Value Constructor Offset Not Coercible to a Primary or Indexed Key."),
+
     OPERATION_TIMED_OUT(6000, "TIM01", "Operation timed out.", new Factory() {
         @Override
         public SQLException newException(SQLExceptionInfo info) {
