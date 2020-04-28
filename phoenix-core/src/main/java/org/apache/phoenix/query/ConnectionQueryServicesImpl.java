@@ -64,6 +64,7 @@ import static org.apache.phoenix.query.QueryServicesOptions.DEFAULT_RENEW_LEASE_
 import static org.apache.phoenix.query.QueryServicesOptions.DEFAULT_RENEW_LEASE_THREAD_POOL_SIZE;
 import static org.apache.phoenix.query.QueryServicesOptions.DEFAULT_RENEW_LEASE_THRESHOLD_MILLISECONDS;
 import static org.apache.phoenix.query.QueryServicesOptions.DEFAULT_RUN_RENEW_LEASE_FREQUENCY_INTERVAL_MILLISECONDS;
+import static org.apache.phoenix.query.QueryServicesOptions.DEFAULT_THRESHOLD_CELL_SIZE;
 import static org.apache.phoenix.util.UpgradeUtil.addParentToChildLinks;
 import static org.apache.phoenix.util.UpgradeUtil.addViewIndexToParentLinks;
 import static org.apache.phoenix.util.UpgradeUtil.getSysCatalogSnapshotName;

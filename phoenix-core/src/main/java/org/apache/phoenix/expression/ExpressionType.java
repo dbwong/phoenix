@@ -192,7 +192,8 @@ public enum ExpressionType {
     CosFunction(CosFunction.class),
     TanFunction(TanFunction.class),
     RowKeyBytesStringFunction(RowKeyBytesStringFunction.class),
-    PhoenixRowTimestampFunction(PhoenixRowTimestampFunction.class)
+    PhoenixRowTimestampFunction(PhoenixRowTimestampFunction.class),
+    BytesOrBlobReference(BytesOrBlobReferenceFunction.class)
     ;
 
     ExpressionType(Class<? extends Expression> clazz) {

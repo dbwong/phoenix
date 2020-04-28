@@ -29,15 +29,24 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Random;
 
+import static org.apache.phoenix.query.QueryServices.THRESHOLD_CELL_SIZE;
 import static org.junit.Assert.assertTrue;
 
 public class BlobTypeIT extends BaseUniqueNamesOwnClusterIT {
 
+    private static final long configuredThreshold = 20L;
+
     @BeforeClass
     public static synchronized void doSetup() throws Exception {
-        setUpTestDriver(ReadOnlyProps.EMPTY_PROPS);
+        Map<String, String> props = new HashMap<>();
+        props.put(THRESHOLD_CELL_SIZE, Long.toString(configuredThreshold));
+        setUpTestDriver(new ReadOnlyProps(props));
     }
 
     @Test
@@ -47,8 +56,8 @@ public class BlobTypeIT extends BaseUniqueNamesOwnClusterIT {
         String tableName = generateUniqueName();
         try (Connection conn = DriverManager.getConnection(getUrl())) {
             try (Statement stmt = conn.createStatement()) {
-                stmt.execute("CREATE TABLE " + tableName + " (id VARCHAR(255) not null primary key, "
-                        + "image BLOB)");
+                stmt.execute("CREATE TABLE " + tableName +
+                        " (id VARCHAR(255) not null primary key, image BLOB)");
             }
             String upsertQuery = "UPSERT INTO " + tableName + " VALUES(?, ?)";
             try (PreparedStatement prepStmt = conn.prepareStatement(upsertQuery)) {
@@ -69,4 +78,36 @@ public class BlobTypeIT extends BaseUniqueNamesOwnClusterIT {
             assertTrue(IOUtils.contentEquals(BlobTypeIT.class.getResourceAsStream(fName), blob.getBinaryStream()));
         }
     }
+
+    @Test
+    public void testImplicitlyHandleLargeData() throws SQLException {
+        String tableName = generateUniqueName();
+        Random random = new Random();
+        byte[] randBytes = new byte[(int) (configuredThreshold + 1)];
+        random.nextBytes(randBytes);
+        try (Connection conn = DriverManager.getConnection(getUrl())) {
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("CREATE TABLE " + tableName +
+                        " (id VARCHAR(255) not null primary key, image varbinary)");
+            }
+            String upsertQuery = "UPSERT INTO " + tableName + " VALUES(?, BYTES_OR_BLOB_REF(?))";
+            try (PreparedStatement prepStmt = conn.prepareStatement(upsertQuery)) {
+                prepStmt.setString(1, "ID1");
+                prepStmt.setBytes(2, randBytes);
+                prepStmt.execute();
+            }
+            conn.commit();
+        }
+        // Assert values upserted above
+        try (Connection conn = DriverManager.getConnection(getUrl());
+                Statement stmt = conn.createStatement()) {
+            ResultSet rs = stmt.executeQuery("SELECT image FROM " + tableName +
+                    " WHERE id='ID1'");
+            assertTrue(rs.next());
+            // TODO: Handle the implicit BLOB conversion in rs
+            rs.getBytes(1);
+            // TODO: Add actual test
+        }
+    }
+
 }
