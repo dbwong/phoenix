@@ -47,7 +47,7 @@ public class PBlob extends PVarbinary {
         try {
             blobMetaData = BlobExpression.BlobMetaData.deserializeBlobMetaData(bytesCopy);
         } catch (IOException | ClassNotFoundException e) {
-            throw new RuntimeException("Could not deserialize BLOB metadata");
+            throw new RuntimeException("Could not deserialize BLOB metadata", e);
         }
         if (blobMetaData != null) {
             BlobExpression dummyBlobExpr = new BlobExpression(null, null, null,

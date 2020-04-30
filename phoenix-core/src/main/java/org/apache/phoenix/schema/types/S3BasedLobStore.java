@@ -11,7 +11,6 @@ import com.amazonaws.services.s3.model.S3Object;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.RandomStringUtils;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -19,7 +18,7 @@ public class S3BasedLobStore implements LobStore {
 
     private static final String ROOT_DIRECTORY = "/tmp/";
     private AmazonS3 s3client;
-    private static String BUCKET_NAME = "phoenixgiants-bucket";
+    private static String BUCKET_NAME = "all-animals";
     private static S3BasedLobStore INSTANCE = null;
 
     public synchronized static S3BasedLobStore getInstance() {
@@ -27,6 +26,10 @@ public class S3BasedLobStore implements LobStore {
             INSTANCE = new S3BasedLobStore();
         }
         return INSTANCE;
+    }
+
+    public static void setBucketName(String bucketName) {
+        BUCKET_NAME = bucketName;
     }
 
     public S3BasedLobStore() {
