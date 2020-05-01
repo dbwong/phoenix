@@ -112,6 +112,7 @@ public class Hackathon {
 
     private int upsertImagesFromStreams(Connection conn, String upsertQuery,
             List<InputStream> streams, String species, int startingId) throws SQLException {
+        S3BasedLobStore.setSpecies(species);
         int i = startingId;
         while(i < streams.size() + startingId) {
             try (PreparedStatement prepStmt = conn.prepareStatement(upsertQuery)) {
@@ -139,7 +140,7 @@ public class Hackathon {
     }
 
     public static void main(String[] args) throws Exception {
-        url =  JDBC_URL_NO_PORT + "56455";
+        url =  JDBC_URL_NO_PORT + "59136";
         props = getProps();
         Hackathon hack = new Hackathon();
         try {

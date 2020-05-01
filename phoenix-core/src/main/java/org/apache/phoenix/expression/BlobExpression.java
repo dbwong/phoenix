@@ -98,7 +98,7 @@ public class BlobExpression extends LiteralExpression {
                 EnvironmentEdgeManager.currentTimeMillis(),
                 format,
                 UUID.randomUUID(),
-                1000L);
+                3072L);
     }
 
     /**

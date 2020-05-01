@@ -19,6 +19,7 @@ public class S3BasedLobStore implements LobStore {
     private static final String ROOT_DIRECTORY = "/tmp/";
     private AmazonS3 s3client;
     private static String BUCKET_NAME = "all-animals";
+    private static String SPECIES = "CATS_";
     private static S3BasedLobStore INSTANCE = null;
 
     public synchronized static S3BasedLobStore getInstance() {
@@ -32,6 +33,10 @@ public class S3BasedLobStore implements LobStore {
         BUCKET_NAME = bucketName;
     }
 
+    public static void setSpecies(String species) {
+        SPECIES = species;
+    }
+
     public S3BasedLobStore() {
         BasicAWSCredentials credentials = new BasicAWSCredentials("FakeAccessKey", "FakeSecretKey");
         s3client = AmazonS3ClientBuilder.standard()
@@ -41,7 +46,8 @@ public class S3BasedLobStore implements LobStore {
 
     @Override
     public String putLob(InputStream lobStream) throws LobStoreException {
-        String lobLocator = RandomStringUtils.randomAlphanumeric(15); //For now use lobLocator
+        String lobLocator = SPECIES + "_" +
+                RandomStringUtils.randomAlphanumeric(15) + ".jpeg"; //For now use lobLocator
         try {
             s3client.putObject(
                    new PutObjectRequest(BUCKET_NAME, lobLocator, lobStream, new ObjectMetadata()));
